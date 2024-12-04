@@ -1,3 +1,99 @@
+<?php
+session_start();
+if (!isset($_SESSION["user"])) {
+    header("Location: login.php");
+    exit();
+}
+session_regenerate_id(true);
+
+// Database connection
+$conn = new mysqli("localhost", "root", "", "formdynamic");
+
+// Check connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+
+// Add or update user
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $id = $_POST['id'] ?? null; // For update
+    $name = trim($_POST['name']);
+    $username = trim($_POST['username']);
+    $age = trim($_POST['age']);
+    $phone = trim($_POST['phone']);
+    $photoName = null;
+    $division_id = $_POST['division_id'];
+    $district_id = $_POST['district_id'];
+    $thana_id = $_POST['thana_id'];
+
+    // Handle photo upload
+    if (isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
+        // Validate photo type (accept JPEG, PNG)
+        $allowedTypes = ['image/jpeg', 'image/png'];
+        $fileType = $_FILES['photo']['type'];
+        if (!in_array($fileType, $allowedTypes)) {
+            echo "<script>alert('Invalid photo type. Only JPEG and PNG are allowed.');</script>";
+            exit();
+        }
+
+        // Get file content and encode it to Base64
+        $fileContent = file_get_contents($_FILES['photo']['tmp_name']);
+        $photoName = base64_encode($fileContent);
+    }
+
+    if ($id) {
+        // Update user
+        $sql = "UPDATE user_management SET name=?, username=?, age=?, phone=?, division_id=?, district_id=?, thana_id=? WHERE id=?";
+        if ($photoName) {
+            $sql .= ", photo=?";
+        }
+        $stmt = $conn->prepare($sql);
+        if ($stmt === false) {
+            die("Error preparing query: " . $conn->error);
+        }
+
+        if ($photoName) {
+            $stmt->bind_param("sssssiisi", $name, $username, $age, $phone, $division_id, $district_id, $thana_id, $id, $photoName);
+        } else {
+            $stmt->bind_param("sssssiis", $name, $username, $age, $phone, $division_id, $district_id, $thana_id, $id);
+        }
+    } else {
+        // Insert user
+        $stmt = $conn->prepare("INSERT INTO user_management (name, username, age, phone, photo, division_id, district_id, thana_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+        if ($stmt === false) {
+            die("Error preparing query: " . $conn->error);
+        }
+
+        $stmt->bind_param("sssssiis", $name, $username, $age, $phone, $photoName, $division_id, $district_id, $thana_id);
+    }
+
+    if ($stmt->execute()) {
+        echo "<script>alert('User saved successfully!');</script>";
+    } else {
+        echo "<script>alert('Error: " . htmlspecialchars($stmt->error) . "');</script>";
+    }
+}
+
+// Delete user
+if (isset($_GET['delete'])) {
+    $id = intval($_GET['delete']);
+    $stmt = $conn->prepare("DELETE FROM user_management WHERE id=?");
+    if ($stmt === false) {
+        die("Error preparing query: " . $conn->error);
+    }
+
+    $stmt->bind_param("i", $id);
+    if ($stmt->execute()) {
+        echo "<script>alert('User deleted successfully!');</script>";
+    } else {
+        echo "<script>alert('Error: " . htmlspecialchars($stmt->error) . "');</script>";
+    }
+}
+
+// Fetch all users
+$result = $conn->query("SELECT * FROM user_management");
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,11 +102,29 @@
   <title>Dynamic Form with Modal</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <style>
+        body {
+            background-color: #f8f9fa;
+        }
+
+        .table-responsive {
+            overflow-x: auto;
+        }
+
+        .btn {
+            margin: 2px 0;
+        }
+
+        .dynamic-field {
+            margin-bottom: 10px;
+        }
+    </style>
 </head>
 <body>
+    <?php include "navbar.php" ?>
   <div class="container my-4">
-    <h1 class="mb-4">Dynamic Form with Delete Button</h1>
-    <button type="button" class="btn btn-success mt-3" data-bs-toggle="modal" data-bs-target="#submitModal">Submit</button>
+    <h1 class="mb-4">Dynamic Form </h1>
+    <button type="button" class="btn btn-success mt-3" data-bs-toggle="modal" data-bs-target="#submitModal">ADD Data</button>
   </div>
 
   <!-- Modal -->
@@ -86,6 +200,57 @@
       </div>
     </div>
   </div>
+
+ <!-- User Table -->
+ <div class="table-responsive mt-4">
+            <table class="table table-bordered table-hover">
+                <thead class="table-secondary">
+                    <tr>
+                        <th>Name</th>
+                        <th>Username</th>
+                        <th>Age</th>
+                        <th>Phone</th>
+                        <th>Photo</th>
+                        <th>Actions</th>
+                        <th>Division</th>
+                        <th>District</th>
+                        <th>Thana</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($result->num_rows > 0): ?>
+                        <?php while ($row = $result->fetch_assoc()): ?>
+                            <tr>
+                                <td><?= htmlspecialchars($row['name']); ?></td>
+                                <td><?= htmlspecialchars($row['username']); ?></td>
+                                <td><?= htmlspecialchars($row['age']); ?></td>
+                                <td><?= htmlspecialchars($row['phone']); ?></td>
+                                <td>
+                                    <?php if ($row['photo']): ?>
+                                        <img src="data:image/jpeg;base64,<?= base64_encode($row['photo']); ?>" width="50" height="50" />
+                                    <?php else: ?>
+                                        No Photo
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <a href="index.php?edit=<?= $row['id']; ?>" class="btn btn-warning btn-sm">Edit</a>
+                                    <a href="index.php?delete=<?= $row['id']; ?>" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure you want to delete this user?')">Delete</a>
+                                </td>
+                                <td>
+                                    <?= getDivisionName($row['division_id']); ?>
+                                </td>
+                                <td>
+                                    <?= getDistrictName($row['district_id']); ?>
+                                </td>
+                                <td>
+                                    <?= getThanaName($row['thana_id']); ?>
+                                </td>
+                            </tr>
+                        <?php endwhile; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/js/bootstrap.bundle.min.js"></script>
   <script>
@@ -199,49 +364,9 @@
       });
 
    
-  // Handle form submission
-  $("#dynamic-form").submit(function (e) {
-    e.preventDefault();
-    const formData = new FormData(this);
-
-    // Collect data for all field groups
-    $(".field-group").each(function () {
-      const field = {
-        name: $(this).find("input[name='name']").val(),
-        username: $(this).find("input[name='username']").val(),
-        age: $(this).find("input[name='age']").val(),
-        phone: $(this).find("input[name='phone']").val(),
-        division: $(this).find("select.division").val(),
-        district: $(this).find("select.district").val(),
-        thana: $(this).find("select.thana").val(),
-      };
-
-      formData.append("formData[]", JSON.stringify(field));
-
-      const photoInput = $(this).find("input[name='photo']");
-      if (photoInput[0].files.length > 0) {
-        formData.append("photo[]", photoInput[0].files[0]);
-      }
-    });
-
-    // Submit via AJAX
-    $.ajax({
-      url: "submit_data.php",
-      type: "POST",
-      data: formData,
-      contentType: false,
-      processData: false,
-      success: function (response) {
-        alert("Form submitted successfully!");
-        location.reload();
-      },
-      error: function (xhr, status, error) {
-        alert(`Error: ${xhr.responseText || error}`);
-      },
-    });
-  });
 
     });
   </script>
 </body>
 </html>
+
